@@ -1,2 +1,2 @@
 FID Score: Not calculated
-Inception Score: Not calculated
+Inception Score: 1.6660

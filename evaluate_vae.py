@@ -3,10 +3,11 @@ import torch
 import numpy as np
 from pathlib import Path
 import argparse
-from torchvision import transforms
+from torchvision import transforms, models
 import torchvision.utils as vutils
 from torch.utils.data import DataLoader
 import PIL.Image as Image
+from scipy.linalg import sqrtm
 from pytorch_lightning import seed_everything
 
 # Ignite imports for FID and IS metrics
@@ -90,69 +91,121 @@ def save_generated_images(images, output_dir, prefix='generated'):
     
     return os.path.join(output_dir, f"{prefix}_grid.png")
 
+def calculate_fid_score(real_imgs, fake_imgs, device='cuda'):
+    """Calculate FID score manually using scipy."""
+    try:
+        # Load the inception model for feature extraction
+        inception = models.inception_v3(weights='DEFAULT', transform_input=False).to(device)
+        inception.eval()
+        
+        # Remove the last classification layer
+        inception.fc = torch.nn.Identity()
+        
+        # Extract features in evaluation mode
+        def get_features(images, batch_size=32):
+            features = []
+            with torch.no_grad():
+                for i in range(0, len(images), batch_size):
+                    batch = images[i:i + batch_size]
+                    batch_features = inception(batch)
+                    features.append(batch_features.cpu().numpy())
+            return np.concatenate(features)
+        
+        # Get features for real and fake images
+        print("Extracting features from real images...")
+        real_features = get_features(real_imgs)
+        print("Extracting features from generated images...")
+        fake_features = get_features(fake_imgs)
+        
+        # Calculate mean and covariance
+        mu_real = np.mean(real_features, axis=0)
+        sigma_real = np.cov(real_features, rowvar=False)
+        
+        mu_fake = np.mean(fake_features, axis=0)
+        sigma_fake = np.cov(fake_features, rowvar=False)
+        
+        # Calculate FID score
+        diff = mu_real - mu_fake
+        
+        # Product might be almost singular
+        covmean, _ = sqrtm(sigma_real.dot(sigma_fake), disp=False)
+        if np.iscomplexobj(covmean):
+            covmean = covmean.real
+            
+        fid = diff.dot(diff) + np.trace(sigma_real + sigma_fake - 2 * covmean)
+        return float(fid)
+    
+    except Exception as e:
+        print(f"Error calculating manual FID score: {str(e)}")
+        return None
+
 def evaluate_with_ignite_metrics(real_dataset, generated_images, device='cuda'):
     """Evaluate FID and Inception Score using PyTorch-Ignite metrics"""
-    # Create data loaders
-    real_loader = DataLoader(real_dataset, batch_size=64, shuffle=False)
-    
-    # Store generated images for batch processing
-    generated_batches = []
-    for i in range(0, len(generated_images), 64):
-        end = min(i + 64, len(generated_images))
-        generated_batches.append(generated_images[i:end])
-    
-    # Define evaluation step
-    def evaluation_step(engine, batch):
-        if isinstance(batch, list):  # Generated batch
-            fake = interpolate(batch)
-            return fake, None  # Only used for Inception Score
-        else:  # Real batch from dataset
-            real = interpolate(batch[0])
-            return None, real  # Only used for FID
-    
-    # Create evaluator engine
-    evaluator = Engine(evaluation_step)
-    
     fid_score = None
     is_score = None
     
-    # Try to calculate FID score
     try:
-        fid_metric = FID(device=device)
-        fid_metric.attach(evaluator, "fid")
+        # Process generated images for metrics
+        print("Processing generated images...")
+        processed_imgs = []
+        for img in generated_images:
+            # Convert to PIL for proper resizing
+            pil_img = transforms.ToPILImage()(img)
+            resized = transforms.Resize((299, 299))(pil_img)
+            tensor = transforms.ToTensor()(resized)
+            # Convert grayscale to RGB if needed
+            if tensor.shape[0] == 1:
+                tensor = tensor.repeat(3, 1, 1)
+            processed_imgs.append(tensor)
         
-        # Run evaluator on real data to calculate FID stats
-        evaluator.run(real_loader)
+        # Convert to batch tensor
+        fake_imgs = torch.stack(processed_imgs).to(device)
         
-        # Run evaluator on generated data
-        evaluator.run(generated_batches)
+        # Process real images - extract first 500 for comparison
+        print("Processing real images...")
+        real_imgs = []
+        for i in range(min(500, len(real_dataset))):
+            img, _ = real_dataset[i]
+            # Convert to PIL for proper resizing
+            pil_img = transforms.ToPILImage()(img)
+            resized = transforms.Resize((299, 299))(pil_img)
+            tensor = transforms.ToTensor()(resized)
+            # Convert grayscale to RGB if needed
+            if tensor.shape[0] == 1:
+                tensor = tensor.repeat(3, 1, 1)
+            real_imgs.append(tensor)
         
-        # Extract metrics
-        metrics = evaluator.state.metrics
-        fid_score = metrics.get('fid')
+        # Convert to batch tensor
+        real_imgs = torch.stack(real_imgs).to(device)
         
-        print(f"FID Score: {fid_score:.4f}")
+        # Calculate Inception Score first (only uses fake images)
+        print("Calculating Inception Score...")
+        inception = InceptionScore(device=device)
+        try:
+            # Process in smaller batches to avoid CUDA memory issues
+            batch_size = 32
+            for i in range(0, len(fake_imgs), batch_size):
+                batch = fake_imgs[i:i+batch_size]
+                inception.update(batch)
+            
+            # Get the score
+            score = inception.compute()
+            if isinstance(score, torch.Tensor):
+                is_score = score.item()
+            else:
+                is_score = float(score)
+            print(f"Inception Score: {is_score:.4f}")
+        except Exception as e:
+            print(f"Error calculating Inception Score: {str(e)}")
+        
+        # Calculate FID Score directly instead of using Ignite
+        print("Calculating FID Score...")
+        fid_score = calculate_fid_score(real_imgs, fake_imgs, device)
+        if fid_score is not None:
+            print(f"FID Score: {fid_score:.4f}")
+        
     except Exception as e:
-        print(f"Error calculating FID score: {str(e)}")
-        print("Continuing with other metrics...")
-    
-    # Try to calculate Inception Score
-    try:
-        # Create new evaluator for Inception Score
-        is_evaluator = Engine(evaluation_step)
-        is_metric = InceptionScore(device=device, output_transform=lambda x: x[0] if x[0] is not None else x[1])
-        is_metric.attach(is_evaluator, "is")
-        
-        # Run evaluator on generated data
-        is_evaluator.run(generated_batches)
-        
-        # Extract metrics
-        metrics = is_evaluator.state.metrics
-        is_score = metrics.get('is')
-        
-        print(f"Inception Score: {is_score:.4f}")
-    except Exception as e:
-        print(f"Error calculating Inception Score: {str(e)}")
+        print(f"General error in metrics calculation: {str(e)}")
     
     return fid_score, is_score
 
