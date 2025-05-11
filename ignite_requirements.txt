@@ -7,4 +7,5 @@ numpy
 matplotlib
 tensorboard>=2.2.0
 PyYAML>=6.0
-torchsummary>=1.5.1 
+torchsummary>=1.5.1
+scipy>=1.7.0 

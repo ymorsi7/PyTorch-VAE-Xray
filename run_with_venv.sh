@@ -24,22 +24,35 @@ echo "Installed packages:"
 pip list | grep -E 'torch|pytorch|ignite'
 
 # Check if logs directory exists
-if [ ! -d "logs" ] || [ ! -d "logs/ChestXray_MSSIM_VAE" ]; then
+if [ ! -d "logs" ]; then
     echo "No checkpoint found. Running training first..."
     python chest_xray_vae.py
 fi
 
-# Find a valid checkpoint
+# Find a valid checkpoint - look for both the old and new naming convention
 CHECKPOINT=$(python -c "
 import glob
 from pathlib import Path
-checkpoints = list(Path('logs').glob('**/checkpoints/*.ckpt'))
+checkpoints = list(Path('logs').glob('**/checkpoints/last.ckpt'))
 print(checkpoints[0] if checkpoints else '')
 ")
 
 if [ -z "$CHECKPOINT" ]; then
-    echo "No checkpoint found after training. Something went wrong."
-    exit 1
+    echo "No checkpoint found after training. Running training first..."
+    python chest_xray_vae.py
+    
+    # Try finding checkpoint again
+    CHECKPOINT=$(python -c "
+    import glob
+    from pathlib import Path
+    checkpoints = list(Path('logs').glob('**/checkpoints/last.ckpt'))
+    print(checkpoints[0] if checkpoints else '')
+    ")
+    
+    if [ -z "$CHECKPOINT" ]; then
+        echo "No checkpoint found after training. Something went wrong."
+        exit 1
+    fi
 fi
 
 echo "Using checkpoint: $CHECKPOINT"

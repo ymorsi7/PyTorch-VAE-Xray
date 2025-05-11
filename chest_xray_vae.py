@@ -219,6 +219,16 @@ def main():
     data = ChestXrayDataModule(**config['data_params'], pin_memory=config['trainer_params']['devices'] > 0)
     data.setup()
     
+    # Check if there are existing checkpoints to resume from
+    import glob
+    from pathlib import Path
+    
+    checkpoint_path = None
+    checkpoints = list(Path('logs').glob(f"{config['logging_params']['name']}/**/checkpoints/last.ckpt"))
+    if checkpoints:
+        checkpoint_path = str(checkpoints[0])
+        print(f"Resuming training from checkpoint: {checkpoint_path}")
+    
     # Initialize trainer
     trainer = Trainer(
         logger=tb_logger,
@@ -236,9 +246,9 @@ def main():
     Path(f"{tb_logger.log_dir}/Samples").mkdir(exist_ok=True, parents=True)
     Path(f"{tb_logger.log_dir}/Reconstructions").mkdir(exist_ok=True, parents=True)
     
-    # Train the model
+    # Train the model, possibly resuming from checkpoint
     print(f"======= Training {config['model_params']['name']} on Chest X-ray dataset =======")
-    trainer.fit(experiment, datamodule=data)
+    trainer.fit(experiment, datamodule=data, ckpt_path=checkpoint_path)
     
     # After training, load the best model
     checkpoint_path = os.path.join(tb_logger.log_dir, "checkpoints/val_loss.ckpt")

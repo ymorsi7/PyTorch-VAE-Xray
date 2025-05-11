@@ -1,0 +1,2 @@
+FID Score: Not calculated
+Inception Score: Not calculated
