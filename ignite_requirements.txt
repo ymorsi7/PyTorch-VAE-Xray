@@ -1,0 +1,10 @@
+torch>=1.9.0
+torchvision>=0.10.0
+pytorch-ignite>=0.4.6
+pytorch-lightning
+pillow
+numpy
+matplotlib
+tensorboard>=2.2.0
+PyYAML>=6.0
+torchsummary>=1.5.1 

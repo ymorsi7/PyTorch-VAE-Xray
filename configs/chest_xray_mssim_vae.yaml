@@ -1,0 +1,34 @@
+model_params:
+  name: "MSSIMVAE"
+  in_channels: 3
+  latent_dim: 128
+  hidden_dims: [32, 64, 128, 256, 512]
+  loss_type: 'mssim'
+  alpha: 0.0025  # Weight for KLD loss term
+  kernel_size: 4
+  M_N: 0.005  # Weight coefficient for KLD in the ELBO
+
+data_params:
+  data_path: "."  # Path to the chest_xray directory
+  train_batch_size: 64
+  val_batch_size: 64
+  patch_size: 64  # Size to resize X-rays
+  num_workers: 4
+
+exp_params:
+  manual_seed: 1234
+  LR: 0.005
+  weight_decay: 0.0
+  scheduler_gamma: 0.95  # Learning rate scheduler decay
+  kld_weight: 0.00025  # Weight for KL divergence loss
+  min_delta: 0.01
+
+trainer_params:
+  accelerator: "auto"
+  devices: 1
+  max_epochs: 100
+  gradient_clip_val: 1.5
+
+logging_params:
+  save_dir: "logs/"
+  name: "ChestXray_MSSIMVAE" 
