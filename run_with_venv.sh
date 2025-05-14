@@ -33,8 +33,17 @@ fi
 CHECKPOINT=$(python -c "
 import glob
 from pathlib import Path
-checkpoints = list(Path('logs').glob('**/checkpoints/last.ckpt'))
-print(checkpoints[0] if checkpoints else '')
+# First look for our improved model checkpoints
+improved_checkpoints = list(Path('logs').glob('ChestXray_DetailedMSSIMVAE/**/checkpoints/last.ckpt'))
+# Then fall back to older model if needed
+default_checkpoints = list(Path('logs').glob('**/checkpoints/last.ckpt'))
+# Use improved if available, otherwise use default
+if improved_checkpoints:
+    print(improved_checkpoints[0])
+elif default_checkpoints:
+    print(default_checkpoints[0])
+else:
+    print('')
 ")
 
 if [ -z "$CHECKPOINT" ]; then

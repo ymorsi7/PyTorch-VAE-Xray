@@ -76,20 +76,55 @@ def generate_samples(model, num_samples=1000, batch_size=64, device='cuda'):
     
     return torch.cat(generated_images, dim=0)
 
-def save_generated_images(images, output_dir, prefix='generated'):
-    """Save generated images to disk"""
+def save_generated_images(images, output_dir, prefix='generated', upscale_size=256):
+    """Save generated images to disk with optional upscaling and enhancement"""
     os.makedirs(output_dir, exist_ok=True)
     
+    # Denormalize images from [-1,1] to [0,1] range if they were normalized
+    if images.min() < 0:
+        images = (images + 1) / 2.0
+    
+    # Apply enhancement to make details more visible
+    enhanced_images = []
+    for img in images:
+        # Convert to PIL for enhancement
+        pil_img = transforms.ToPILImage()(img)
+        
+        # Enhance contrast (make whites whiter and darks darker)
+        from PIL import ImageEnhance
+        enhancer = ImageEnhance.Contrast(pil_img)
+        enhanced = enhancer.enhance(1.3)  # Increase contrast by 30%
+        
+        # Enhance sharpness
+        sharpener = ImageEnhance.Sharpness(enhanced)
+        enhanced = sharpener.enhance(1.5)  # Increase sharpness by 50%
+        
+        # Convert back to tensor
+        enhanced_tensor = transforms.ToTensor()(enhanced)
+        enhanced_images.append(enhanced_tensor)
+    
+    # Convert back to a batch tensor
+    enhanced_images = torch.stack(enhanced_images)
+    
     # Create a grid of sample images (for visualization)
-    grid_img = vutils.make_grid(images[:64], nrow=8, normalize=True, padding=2)
+    grid_img = vutils.make_grid(enhanced_images[:64], nrow=8, normalize=False, padding=2)
     vutils.save_image(grid_img, os.path.join(output_dir, f"{prefix}_grid.png"))
     
-    # Save individual images
-    for i, img in enumerate(images):
+    # Upscale images before saving
+    for i, img in enumerate(enhanced_images):
         img_path = os.path.join(output_dir, f"{prefix}_{i:04d}.png")
-        vutils.save_image(img, img_path, normalize=True)
+        
+        # Convert to PIL, upscale, and save
+        pil_img = transforms.ToPILImage()(img)
+        pil_img = pil_img.resize((upscale_size, upscale_size), Image.BICUBIC)
+        pil_img.save(img_path)
     
-    return os.path.join(output_dir, f"{prefix}_grid.png")
+    # Also save an upscaled grid
+    pil_grid = transforms.ToPILImage()(grid_img)
+    grid_upscaled = pil_grid.resize((upscale_size * 8, upscale_size), Image.BICUBIC)
+    grid_upscaled.save(os.path.join(output_dir, f"{prefix}_grid_large.png"))
+    
+    return os.path.join(output_dir, f"{prefix}_grid_large.png")
 
 def calculate_fid_score(real_imgs, fake_imgs, device='cuda'):
     """Calculate FID score manually using scipy."""

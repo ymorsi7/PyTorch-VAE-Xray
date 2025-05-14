@@ -90,16 +90,21 @@ class ChestXrayDataModule(LightningDataModule):
     def setup(self, stage=None):
         # Define transforms for the training and validation sets
         train_transforms = transforms.Compose([
-            transforms.Resize(self.patch_size),
-            transforms.CenterCrop(self.patch_size),
+            transforms.Resize(self.patch_size + 8),  # Resize slightly larger for cropping
+            transforms.RandomCrop(self.patch_size),  # Random crop for more variation
             transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(5),  # Slight rotation for robustness
+            transforms.RandomAutocontrast(p=0.3),  # Enhance contrast sometimes
+            transforms.RandomAdjustSharpness(sharpness_factor=1.5, p=0.3),  # Sharpen some images
             transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,)),  # Normalize to [-1, 1] for better training
         ])
         
         val_transforms = transforms.Compose([
             transforms.Resize(self.patch_size),
             transforms.CenterCrop(self.patch_size),
             transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,)),  # Same normalization for consistency
         ])
         
         # Create the datasets
@@ -154,37 +159,42 @@ def create_config():
         'model_params': {
             'name': 'MSSIMVAE',
             'in_channels': 3,
-            'latent_dim': 128,
-            'hidden_dims': [32, 64, 128, 256, 512],
+            'latent_dim': 512,  # Increased from 128 to 512 for more details
+            'hidden_dims': [32, 64, 128, 256, 512],  # Keeping original architecture
             'loss_type': 'mssim',
-            'alpha': 0.0025,  # Weight for KLD loss
+            'alpha': 0.0015,  # Reduced from 0.0025 for less blur
             'kernel_size': 4,
-            'M_N': 0.005,  # Weight coefficient for KLD in the ELBO
+            'M_N': 0.0025,  # Reduced from 0.005 to reduce the KL regularization strength
         },
         'data_params': {
             'data_path': '.',  # Path to the dataset directory
-            'train_batch_size': 64,
+            'train_batch_size': 64,  # Back to original batch size
             'val_batch_size': 64,
-            'patch_size': 64,
+            'patch_size': 64,  # Back to original 64x64 to avoid dimension mismatch
             'num_workers': 4,
         },
         'exp_params': {
             'manual_seed': 1234,
-            'LR': 0.005,
-            'weight_decay': 0.0,
-            'scheduler_gamma': 0.95,
-            'kld_weight': 0.00025,
+            'LR': 0.0025,  # Reduced from 0.005 for more stable training
+            'weight_decay': 0.00001,  # Added slight weight decay for regularization
+            'scheduler_gamma': 0.97,  # Slower decay (was 0.95)
+            'kld_weight': 0.00015,  # Reduced from 0.00025 to allow more detailed reconstructions
             'min_delta': 0.01
         },
         'trainer_params': {
             'accelerator': 'auto',
             'devices': 1,
-            'max_epochs': 100,
-            'gradient_clip_val': 1.5
+            'max_epochs': 50,  # Reduced epochs for initial testing
+            'gradient_clip_val': 1.0,  # Reduced from 1.5 for stability
+            'log_every_n_steps': 20,  # Log less frequently to save space
+            'enable_checkpointing': True,
+            'enable_progress_bar': True,
         },
         'logging_params': {
             'save_dir': 'logs',
-            'name': 'ChestXray_MSSIMVAE'
+            'name': 'ChestXray_DetailedMSSIMVAE',  # New name to avoid confusion
+            'flush_logs_every_n_steps': 100,  # Flush logs less frequently
+            'log_save_interval': 5,  # Save logs less frequently
         }
     }
     return config
@@ -206,7 +216,9 @@ def main():
     
     # Set up logger
     tb_logger = TensorBoardLogger(save_dir=config['logging_params']['save_dir'],
-                                 name=config['logging_params']['name'])
+                                 name=config['logging_params']['name'],
+                                 log_graph=False,  # Don't save model graph to save space
+                                 default_hp_metric=False)  # Don't log hyperparameters to save space
     
     # Set seed for reproducibility
     seed_everything(config['exp_params']['manual_seed'], True)
@@ -229,12 +241,11 @@ def main():
         checkpoint_path = str(checkpoints[0])
         print(f"Resuming training from checkpoint: {checkpoint_path}")
     
-    # Initialize trainer
+    # Initialize trainer with fewer callbacks
     trainer = Trainer(
         logger=tb_logger,
         callbacks=[
-            LearningRateMonitor(),
-            ModelCheckpoint(save_top_k=2, 
+            ModelCheckpoint(save_top_k=1,  # Keep only the best model
                            dirpath=os.path.join(tb_logger.log_dir, "checkpoints"), 
                            monitor="val_loss",
                            save_last=True),
@@ -242,29 +253,12 @@ def main():
         **config['trainer_params']
     )
     
-    # Create directories for samples and reconstructions
+    # Create directories for samples and reconstructions - only a few samples
     Path(f"{tb_logger.log_dir}/Samples").mkdir(exist_ok=True, parents=True)
-    Path(f"{tb_logger.log_dir}/Reconstructions").mkdir(exist_ok=True, parents=True)
     
     # Train the model, possibly resuming from checkpoint
     print(f"======= Training {config['model_params']['name']} on Chest X-ray dataset =======")
     trainer.fit(experiment, datamodule=data, ckpt_path=checkpoint_path)
-    
-    # After training, load the best model
-    checkpoint_path = os.path.join(tb_logger.log_dir, "checkpoints/val_loss.ckpt")
-    if os.path.exists(checkpoint_path):
-        experiment = VAEExperiment.load_from_checkpoint(checkpoint_path)
-        model = experiment.model
-        
-        # Generate samples
-        samples = generate_samples(model, num_samples=16)
-        
-        # Save samples
-        import torchvision
-        img_grid = torchvision.utils.make_grid(samples, nrow=4, normalize=True)
-        torchvision.utils.save_image(img_grid, os.path.join(tb_logger.log_dir, "Samples/generated_samples.png"))
-        
-        print(f"Generated samples saved to {os.path.join(tb_logger.log_dir, 'Samples/generated_samples.png')}")
 
 if __name__ == "__main__":
     main() 
