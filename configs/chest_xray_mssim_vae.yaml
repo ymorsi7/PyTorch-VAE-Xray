@@ -1,12 +1,12 @@
 model_params:
   name: "MSSIMVAE"
   in_channels: 3
-  latent_dim: 128
+  latent_dim: 512
   hidden_dims: [32, 64, 128, 256, 512]
   loss_type: 'mssim'
-  alpha: 0.0025  # Weight for KLD loss term
+  alpha: 0.0015
   kernel_size: 4
-  M_N: 0.005  # Weight coefficient for KLD in the ELBO
+  M_N: 0.0025
 
 data_params:
   data_path: "."  # Path to the chest_xray directory
@@ -26,7 +26,7 @@ exp_params:
 trainer_params:
   accelerator: "auto"
   devices: 1
-  max_epochs: 100
+  max_epochs: 200
   gradient_clip_val: 1.5
 
 logging_params:
