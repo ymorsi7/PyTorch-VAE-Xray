@@ -182,9 +182,9 @@ def create_config():
             'min_delta': 0.01
         },
         'trainer_params': {
-            'accelerator': 'auto',
+            'accelerator': 'mps',
             'devices': 1,
-            'max_epochs': 50,  # Reduced epochs for initial testing
+            'max_epochs': 200,  # Increased to match YAML and be greater than the current checkpoint epoch
             'gradient_clip_val': 1.0,  # Reduced from 1.5 for stability
             'log_every_n_steps': 20,  # Log less frequently to save space
             'enable_checkpointing': True,

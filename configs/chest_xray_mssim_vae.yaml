@@ -24,7 +24,7 @@ exp_params:
   min_delta: 0.01
 
 trainer_params:
-  accelerator: "auto"
+  accelerator: "mps"
   devices: 1
   max_epochs: 200
   gradient_clip_val: 1.5

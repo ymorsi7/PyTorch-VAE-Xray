@@ -67,10 +67,14 @@ class VAEXperiment(pl.LightningModule):
 
 #         test_input, test_label = batch
         recons = self.model.generate(test_input, labels = test_label)
+        
+        # Create directories if they don't exist
+        reconstructions_dir = os.path.join(self.logger.log_dir, "Reconstructions")
+        os.makedirs(reconstructions_dir, exist_ok=True)
+        
         vutils.save_image(recons.data,
-                          os.path.join(self.logger.log_dir , 
-                                       "Reconstructions", 
-                                       f"recons_{self.logger.name}_Epoch_{self.current_epoch}.png"),
+                          os.path.join(reconstructions_dir, 
+                                      f"recons_{self.logger.name}_Epoch_{self.current_epoch}.png"),
                           normalize=True,
                           nrow=12)
 
@@ -78,10 +82,14 @@ class VAEXperiment(pl.LightningModule):
             samples = self.model.sample(144,
                                         self.curr_device,
                                         labels = test_label)
+            
+            # Create samples directory if it doesn't exist
+            samples_dir = os.path.join(self.logger.log_dir, "Samples")
+            os.makedirs(samples_dir, exist_ok=True)
+            
             vutils.save_image(samples.cpu().data,
-                              os.path.join(self.logger.log_dir , 
-                                           "Samples",      
-                                           f"{self.logger.name}_Epoch_{self.current_epoch}.png"),
+                              os.path.join(samples_dir,      
+                                          f"{self.logger.name}_Epoch_{self.current_epoch}.png"),
                               normalize=True,
                               nrow=12)
         except Warning:
